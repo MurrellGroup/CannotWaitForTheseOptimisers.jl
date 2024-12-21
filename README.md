@@ -10,8 +10,8 @@ A collection of experimental optimizers implemented according to the [Optimisers
 ## Installation
 
   ```julia
-  julia> using Pkg
-  julia> Pkg.add("CannotWaitForTheseOptimisers")
+  pkg> add Optimisers
+  pkg> add https://github.com/MurrellGroup/CannotWaitForTheseOptimisers.jl
   ```
 
 ## Usage
