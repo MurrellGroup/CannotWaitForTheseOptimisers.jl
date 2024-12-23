@@ -17,7 +17,7 @@ StaticArrays = "1.9.9"
 Statistics = "1.11.1"
 Test = "1.11.0"
 Zygote = "0.6.73"
-julia = "1.9"
+julia = "1.10"
 
 [extras]
 Optimisers = "3bd65402-5787-11e9-1adc-39752487f4e2"
