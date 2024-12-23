@@ -5,7 +5,7 @@
 [![Build Status](https://github.com/MurrellGroup/CannotWaitForTheseOptimisers.jl/actions/workflows/CI.yml/badge.svg?branch=main)](https://github.com/MurrellGroup/CannotWaitForTheseOptimisers.jl/actions/workflows/CI.yml?query=branch%3Amain)
 [![Coverage](https://codecov.io/gh/MurrellGroup/CannotWaitForTheseOptimisers.jl/branch/main/graph/badge.svg)](https://codecov.io/gh/MurrellGroup/CannotWaitForTheseOptimisers.jl)
 
-A collection of experimental optimizers implemented according to the [Optimisers.jl](https://github.com/FluxML/Optimisers.jl) interface. This package serves as a testing ground for new optimization algorithms before they are potentially incorporated into the main Optimisers.jl package.
+A collection of experimental optimizers implemented according to the [Optimisers.jl](https://github.com/FluxML/Optimisers.jl) interface. We intend to use this package as a testing ground for new optimization algorithms, and then possibly get them incorporated into the main Optimisers.jl package. As such, please do not expect much stability from this package.
 
 ## Installation
 
@@ -22,4 +22,8 @@ A collection of experimental optimizers implemented according to the [Optimisers
 
 ## Description
 
-This package includes recent and experimental optimizers that have not yet been incorporated into [Optimisers.jl](https://github.com/FluxML/Optimisers.jl). All optimizers adhere to the same interface, ensuring seamless integration and compatibility with existing workflows.
+This package currently includes attempts at implementing:
+
+- [x] [Muon](https://kellerjordan.github.io/posts/muon/) which performs an orthogonalization step before parameter update, and seems excellent for training transformers.
+- [x] [Apollo](https://arxiv.org/abs/2412.05270) which tracks low rank moments using a random projection, reducing the memory footprint of the optimizer.
+- [x] [NormGrowthCap](https://arxiv.org/abs/2410.01623) which prevents the norm of the parameters from growing too quickly.
