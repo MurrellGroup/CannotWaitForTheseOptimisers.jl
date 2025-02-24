@@ -8,7 +8,7 @@ Random.seed!(1)
 RULES = [
   Muon(), Apollo(),
   OptimiserChain(NormGrowthCap(), Apollo()),
-  OptimiserChain(GradNormControl(), Muon())
+  OptimiserChain(GradNormControl([0.0,0.0]), Muon())
 ]
 
 name(o) = typeof(o).name.name  # just for printing testset headings
