@@ -97,7 +97,7 @@ NormGrowthCap(τ = 1.01; ϵ = 1e-8, lb = 1e-7, throw = true, scale = true) = Nor
 init(o::NormGrowthCap, x::AbstractArray{T}) where T = T(0)
 
 function apply!(o::NormGrowthCap, state, x::AbstractArray{T}, dx) where T
-    current_norm = _norm(dx, 2)
+    current_norm = _norm(Optimisers.unthunk(dx), 2)
     if o.throw && !isfinite(current_norm)
         throw(DomainError("gradient has L2-norm $current_norm, for array $(summary(x))"))
     end
@@ -106,7 +106,7 @@ function apply!(o::NormGrowthCap, state, x::AbstractArray{T}, dx) where T
     else
         #If you're below the hard min, then don't scale
         if o.scale
-            minthresh = o.lb * sqrt(length(dx))
+            minthresh = o.lb * sqrt(length(Optimisers.unthunk(dx)))
         else
             minthresh = o.lb
         end
@@ -122,6 +122,71 @@ function apply!(o::NormGrowthCap, state, x::AbstractArray{T}, dx) where T
         end
     end
 end
+
+
+"""
+    GradNormControl(accumulator, τ = 1.1; epsilon = 1e-8, lb = 0.1, throw = true, scale = true, clipreportthresh = Inf)
+
+NormGrowthCap with additional control, accumulation, and reporting options.
+`accumulator` must be an array of `Float64` with two elements, which is where the unscaled and scaled gradient norms are added into, allowing you to monitor the sum of the norms. It is your job to print/reset this.
+"""
+struct GradNormControl <: Optimisers.AbstractRule
+    tau::Float64
+    epsilon::Float64
+    lb::Float64 #Min grad norm, to stop a tensor getting stuck near zero
+    throw::Bool
+    scale::Bool
+    heavyclipthresh::Real
+    accumulator::AbstractVector{<:Float64}
+end
+
+function GradNormControl(accumulator, τ = 1.1; epsilon = 1e-8, lb = 0.1, throw = true, scale = true, clipreportthresh = Inf)
+    if length(accumulator) != 2
+        throw(ArgumentError("accumulator must be an array with two elements, initialized to 0"))
+    end
+    GradNormControl(τ, epsilon, lb, throw, scale, clipreportthresh, accumulator)
+end
+
+function init(o::GradNormControl, x::AbstractArray{T}) where T
+    if o.scale
+        minthresh = o.lb * sqrt(length(x))
+    else
+        minthresh = o.lb
+    end
+    return T(0), minthresh
+end
+
+function apply!(o::GradNormControl, state, x::AbstractArray{T}, dx) where T
+    prevnorm, minthresh = state
+    utdx = Optimisers.unthunk(dx)
+    current_norm = Optimisers._norm(utdx, 2)
+    o.accumulator[1] += current_norm
+    if o.throw && !isfinite(current_norm)
+        throw(DomainError("gradient has L2-norm $current_norm, for array $(summary(x))"))
+    end
+    if prevnorm == 0
+        o.accumulator[2] += current_norm
+        return (current_norm, minthresh), dx
+    else
+        if current_norm < minthresh
+            o.accumulator[2] += current_norm
+            return (current_norm, minthresh), dx
+        end
+        ratio = current_norm / (prevnorm + o.epsilon)
+        if ratio > o.tau
+            lambda = T((o.tau * prevnorm) / (current_norm + o.epsilon))
+            if ratio > o.tau * o.heavyclipthresh
+                println("Heavy clipping on $(size(utdx)):", current_norm, "->", current_norm * lambda)
+            end
+            o.accumulator[2] += current_norm * lambda
+            return (current_norm * lambda, minthresh), dx * lambda
+        else
+            o.accumulator[2] += current_norm
+            return (current_norm, minthresh), dx
+        end
+    end
+end
+
 
 """
     Apollo(opt::AdamW = AdamW(), r::Function = dim -> ceil(Int, sqrt(dim)); u = 100, sort_dims = true)
