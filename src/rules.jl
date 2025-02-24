@@ -189,6 +189,82 @@ end
 
 
 """
+    AdaptiveGradNormControl(accumulator, τ = 1.0; epsilon = 1e-8, lb = 0.1, 
+                           momentum = 0.90, throw = true, clipreportthresh = Inf)
+
+Gradient norm control using exponential moving statistics. Clips gradients when the 
+current norm exceeds mean + τ * std.
+"""
+struct AdaptiveGradNormControl <: Optimisers.AbstractRule
+    tau::Float64
+    epsilon::Float64
+    lb::Float64
+    throw::Bool
+    momentum::Float64
+    heavyclipthresh::Real
+    accumulator::AbstractVector{<:Float64}
+end
+
+function AdaptiveGradNormControl(accumulator, τ = 1.0; epsilon = 1e-8, lb = 0.1, 
+                                momentum = 0.9, throw = true, clipreportthresh = Inf)
+    if length(accumulator) != 2
+        throw(ArgumentError("accumulator must be an array with two elements"))
+    end
+    AdaptiveGradNormControl(τ, epsilon, lb, throw, momentum, clipreportthresh, accumulator)
+end
+
+# Helper function to update running statistics
+function update_running_stats(curr_norm, prev_mean, prev_std, momentum)
+    new_mean = momentum * prev_mean + (1 - momentum) * curr_norm
+    # Variance update formula: var = E[(x - μ)²] = E[x²] - μ²
+    new_var = momentum * (prev_std^2 + prev_mean^2) + 
+              (1 - momentum) * curr_norm^2 - new_mean^2
+    new_std = sqrt(max(new_var, 1e-8))
+    return new_mean, new_std
+end
+
+function Optimisers.init(o::AdaptiveGradNormControl, x::AbstractArray{T}) where T
+    minthresh = o.lb * sqrt(length(x))
+    return (T(0), T(0), minthresh)  # mean, std, minthresh
+end
+
+function Optimisers.apply!(o::AdaptiveGradNormControl, state, x::AbstractArray{T}, dx) where T
+    mu, std, minthresh = state
+    utdx = Optimisers.unthunk(dx)
+    current_norm = Optimisers._norm(utdx, 2)
+    o.accumulator[1] += current_norm
+    if o.throw && !isfinite(current_norm)
+        throw(DomainError("gradient has L2-norm $current_norm"))
+    end
+    if current_norm < minthresh
+        o.accumulator[2] += current_norm
+        new_mean, new_std = update_running_stats(current_norm, mu, std, o.momentum) #Unsure if we should adjust the mean if they fall below the threshold?
+        return (new_mean, new_std, minthresh), dx
+    end
+    if mu == 0
+        o.accumulator[2] += current_norm
+        return (current_norm, current_norm, minthresh), dx
+    end
+    threshold = mu + o.tau * std
+    if current_norm > threshold
+        lambda = T(threshold / (current_norm + o.epsilon))
+        clipped_norm = current_norm * lambda
+        if current_norm > threshold * o.heavyclipthresh
+            println("Heavy clipping on $(size(utdx)): ", current_norm, "->", clipped_norm, " with mu ", mu, " and std ", std)
+        end
+        new_mean, new_std = update_running_stats(clipped_norm, mu, std, o.momentum)
+        o.accumulator[2] += clipped_norm
+        return (new_mean, new_std, minthresh), dx * lambda
+    end
+    o.accumulator[2] += current_norm
+    new_mean, new_std = update_running_stats(current_norm, mu, std, o.momentum)
+    return (new_mean, new_std, minthresh), dx
+end
+
+
+
+
+"""
     Apollo(opt::AdamW = AdamW(), r::Function = dim -> ceil(Int, sqrt(dim)); u = 100, sort_dims = true)
     Apollo(η::Real, args...; kw...)
     Apollo(arg, rank::Int; kw...)
