@@ -47,9 +47,9 @@ function apply!(o::Muon, state, x::AbstractArray{T}, dx) where T
     else
       η = T(o.eta); μ = T(o.mu); λ = T(o.lambda)
       # momentum: m ← β m + (1-β) g
-      @. state = μ * state + (one(T) - μ) * dx
+      @.. state = μ * state + (one(T) - μ) * dx
       # Nesterov update fed to NS5: U ← (1-β) g + β m
-      U = @. (one(T) - μ) * dx + μ * state
+      U = @.. (one(T) - μ) * dx + μ * state
       # orthogonalize + post shape factor √max(1, r/c)
       Ot = _newton_schulz5(U)
       r = size(x, 1); c = nonfirstdims(x)
