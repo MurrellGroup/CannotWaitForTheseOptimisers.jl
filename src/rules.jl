@@ -42,15 +42,21 @@ function init(o::Muon, x::AbstractArray)
 end
 
 function apply!(o::Muon, state, x::AbstractArray{T}, dx) where T
-  if nonfirstdims(x) == 1 || o.fallback(x)
-    return apply!(o.opt, state, x, dx)
-  else
-    η, μ, λ = T(o.eta), T(o.mu), T(o.lambda)
-    @.. state = μ * state + dx
-    Ot = _newton_schulz5(μ .* state .+ dx) * T(sqrt(max(1, size(x,1)/nonfirstdims(x))))
-    dx′ = @lazy η * (Ot + λ * x)
-    return state, dx′
-  end
+    if nonfirstdims(x) == 1 || o.fallback(x)
+      return apply!(o.opt, state, x, dx)
+    else
+      η = T(o.eta); μ = T(o.mu); λ = T(o.lambda)
+      # momentum: m ← β m + (1-β) g
+      @. state = μ * state + (one(T) - μ) * dx
+      # Nesterov update fed to NS5: U ← (1-β) g + β m
+      U = @. (one(T) - μ) * dx + μ * state
+      # orthogonalize + post shape factor √max(1, r/c)
+      Ot = _newton_schulz5(U)
+      r = size(x, 1); c = nonfirstdims(x)
+      s = T(sqrt(max(one(T), T(r) / T(c))))
+      dx′ = @lazy η * (Ot * s + λ * x)   # decoupled WD, step will subtract dx′
+      return state, dx′
+    end
 end
 
 function _inner_newton_schulz5(X::AbstractMatrix{T}) where T
@@ -62,12 +68,13 @@ function _inner_newton_schulz5(X::AbstractMatrix{T}) where T
   end 
   X
 end
+
 function _newton_schulz5(G::AbstractMatrix{T}) where T
-    X = G / (norm(G) + eps(T))
+    X = G / (norm(G) + T(1e-7))
     if size(G, 1) > size(G, 2)
-      transpose(_inner_newton_schulz5(transpose(X)))
+      return transpose(_inner_newton_schulz5(transpose(X)))
     else
-      _inner_newton_schulz5(X)
+      return _inner_newton_schulz5(X)
     end
 end
 _newton_schulz5(G::AbstractArray) = reshape(_newton_schulz5(reshape(G, size(G,1), :)), size(G))
