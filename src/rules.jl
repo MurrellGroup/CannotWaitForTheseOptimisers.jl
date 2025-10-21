@@ -1,3 +1,4 @@
+using LinearAlgebra: mul!
 
 nonfirstdims(x) = prod(size(x)[2:end])
 
@@ -23,63 +24,81 @@ In nanoGPT speedrun experiments, Muon is used for the internal layer >2D weights
 `Optimisers.adjust!(optimiser_state, η::Real)` will adjust the fallback optimizer's `eta` to `η * (opt.eta / eta)`, and Muon's `eta` to `η`, preserving their ratio,
 but `Optimisers.adjust!(optimiser, eta = η)` will only adjust Muon's learning rate (allowing you to adjust the fallback optimizer's learning rate separately).
 """
-struct Muon <: AbstractRule
-    opt::AbstractRule
-    eta::Float64
-    mu::Float64
-    lambda::Float64
-    fallback::Function
+@kwdef struct Muon <: AbstractRule
+    eta = 0.02
+    mu = 0.95
+    lambda = 0.01
 end
 
-Muon(;opt = AdamW(eta = 0.0003, beta = (0.9,0.95), lambda = 0.01), eta = 0.02, mu = 0.95, lambda = 0.01, fallback = x -> false) = Muon(opt, eta, mu, lambda, fallback)
+init(::Muon, x::AbstractArray) = zero(x)
 
-function init(o::Muon, x::AbstractArray)
-  if nonfirstdims(x) == 1 || o.fallback(x)
-    return init(o.opt, x)
-  else
-    return zero(x)
-  end
+function apply!((; eta, mu, lambda)::Muon, state, x::AbstractArray{T}, dx) where T
+    η, μ, λ = T(eta), T(mu), T(lambda)
+    # momentum: m ← β m + (1-β) g
+    @.. state = μ * state + (1 - μ) * dx
+    # Nesterov update fed to NS5: U ← β m + (1-β) g
+    U = @. μ * state + (1 - μ) * dx
+    # orthogonalize
+    @.. U = U / ($norm(U) + T(1e-6))
+    Ot = newtonschulz5!!(U)
+    # post shape factor √max(1, r/c)
+    r, c... = size(x)
+    s = √max(1, T(r) / prod(c))
+    dx′ = @lazy η * (Ot * s + λ * x)   # decoupled WD, step will subtract dx′
+    return state, dx′
 end
 
-function apply!(o::Muon, state, x::AbstractArray{T}, dx) where T
-    if nonfirstdims(x) == 1 || o.fallback(x)
-      return apply!(o.opt, state, x, dx)
+const NS5_COEFFICIENTS = (; a = 3.4445f0, b = -4.7750f0, c = 2.0315f0)
+
+# Applies `X = a*X + b*X*X'*X + c*X*X'*X*X'*X` five times,
+# with two branches based on X*X' and X'*X respectively,
+# to minimize memory usage.
+function _newtonschulz5(X::AbstractMatrix{T}) where T
+    (; a, b, c) = map(T, NS5_COEFFICIENTS)
+    if size(X, 1) <= size(X, 2)
+        for _ in 1:5
+            A = X * X'
+            B = b * A + c * A * A
+            X = a * X + B * X
+        end
     else
-      η = T(o.eta); μ = T(o.mu); λ = T(o.lambda)
-      # momentum: m ← β m + (1-β) g
-      @.. state = μ * state + (one(T) - μ) * dx
-      # Nesterov update fed to NS5: U ← (1-β) g + β m
-      U = @. (one(T) - μ) * dx + μ * state
-      # orthogonalize + post shape factor √max(1, r/c)
-      Ot = _newton_schulz5(U)
-      r = size(x, 1); c = nonfirstdims(x)
-      s = T(sqrt(max(one(T), T(r) / T(c))))
-      dx′ = @lazy η * (Ot * s + λ * x)   # decoupled WD, step will subtract dx′
-      return state, dx′
+        for _ in 1:5
+            A = X' * X
+            B = b * A + c * A * A
+            X = a * X + X * B
+        end
     end
+    return X
 end
 
-function _inner_newton_schulz5(X::AbstractMatrix{T}) where T
-  a, b, c = (T(3.4445f0), T(-4.7750f0), T(2.0315f0))
-  for _ in 1:5
-    A = X * X'
-    B = b * A + c * A * A
-    X = a * X + B * X
-  end 
-  X
-end
-
-function _newton_schulz5(G::AbstractMatrix{T}) where T
-    X = G / (norm(G) + T(1e-7))
-    if size(G, 1) > size(G, 2)
-      return transpose(_inner_newton_schulz5(transpose(X)))
+# In-place version of _newtonschulz5 that uses
+# three buffers with a total size of 2n²+nm.
+function _newtonschulz5!(X::AbstractMatrix)
+    n = minimum(size(X))
+    A = similar(X, n, n)
+    B = similar(X, n, n)
+    x = similar(X) # mirror of X
+    (; a, b, c) = NS5_COEFFICIENTS
+    if size(X, 1) <= size(X, 2)
+        for _ in 1:5
+            mul!(A, X, X')
+            copyto!(B, A); mul!(B, A, A, c, b)
+            copyto!(x, X); mul!(X, B, x, true, a)
+        end
     else
-      return _inner_newton_schulz5(X)
+        for _ in 1:5
+            mul!(A, X', X)
+            copyto!(B, A); mul!(B, A, A, c, b)
+            copyto!(x, X); mul!(X, x, B, true, a)
+        end
     end
+    return X
 end
-_newton_schulz5(G::AbstractArray) = reshape(_newton_schulz5(reshape(G, size(G,1), :)), size(G))
 
-adjust(r::Muon, η::Real) = adjust(r, eta = η, opt = adjust(r.opt, eta = (r.opt.eta / r.eta) * η))
+newtonschulz5!!(X::AbstractMatrix) = maywrite(X) ? _newtonschulz5!(X) : _newtonschulz5(X)
+newtonschulz5!!(X::AbstractArray) = reshape(newtonschulz5!!(reshape(X, size(X, 1), :)), size(X))
+
+adjust(r::Muon, η::Real) = adjust(r, eta = η)
 
 """
     NormGrowthCap(τ = 1.01; ϵ = 1e-8, lb = 1e-7, throw = true, scale = true)
