@@ -1,6 +1,6 @@
 name = "CannotWaitForTheseOptimisers"
 uuid = "16124dda-d9fe-413b-a880-e3f4df3aa341"
-version = "0.1.1"
+version = "0.1.2"
 authors = ["murrellb <murrellb@gmail.com> and contributors"]
 
 [workspace]
