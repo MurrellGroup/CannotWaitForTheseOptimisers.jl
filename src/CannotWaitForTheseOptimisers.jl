@@ -5,6 +5,8 @@ import Optimisers: OptimiserChain, AbstractRule, Leaf, adjust, adjust!, _adjust,
 
 include("rules.jl")
 include("adjust.jl")
+include("setup.jl")
+include("Experimental/Experimental.jl")
 
 export Muon, Apollo, NormGrowthCap, GradNormControl, AdaptiveGradNormControl
 

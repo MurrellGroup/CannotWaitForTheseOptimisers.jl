@@ -12,3 +12,9 @@ Documentation for [CannotWaitForTheseOptimisers](https://github.com/MurrellGroup
 ```@autodocs
 Modules = [CannotWaitForTheseOptimisers]
 ```
+
+## Experimental
+
+```@autodocs
+Modules = [CannotWaitForTheseOptimisers.Experimental]
+```
