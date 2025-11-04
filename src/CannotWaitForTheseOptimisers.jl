@@ -8,6 +8,6 @@ include("adjust.jl")
 include("setup.jl")
 include("Experimental/Experimental.jl")
 
-export Apollo, NormGrowthCap, GradNormControl, AdaptiveGradNormControl
+export Muon, Apollo, NormGrowthCap, GradNormControl, AdaptiveGradNormControl
 
 end
