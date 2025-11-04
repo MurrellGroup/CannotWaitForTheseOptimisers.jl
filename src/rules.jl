@@ -1,4 +1,85 @@
+
 nonfirstdims(x) = prod(size(x)[2:end])
+
+"""
+    Muon(opt = AdamW(eta = 0.0003, beta = (0.9,0.95), lambda = 0.01), η = 0.02, μ = 0.95, λ = 0.01, fallback = Returns(false))
+    Muon(; [opt, eta, mu, lambda, fallback])
+
+Muon - MomentUm Orthogonalized by Newton-schulz (https://github.com/KellerJordan/Muon)
+
+Muon internally runs standard SGD-momentum, and then performs an orthogonalization post-processing step,
+in which each 2D parameter's update is replaced with the nearest orthogonal matrix using Newton-Schulz iteration.
+
+# Parameters
+- Fallback optimizer (`opt`): Optimizer to use for 1D parameters or when the `fallback` function returns true
+- Learning rate (`η == eta`): Amount by which gradients are discounted before updating the weights
+- Momentum (`μ == mu`): Controls the acceleration of gradient descent in the prominent direction
+- Weight decay (`λ == lambda`): Controls the strength of ``L_2`` regularisation.
+- Fallback function (`fallback`): Function to control when, in addition to 1D arrays, the fallback optimizer should be used. Will be passed the parameter array and must return a boolean.
+
+Note: Works best with large batch sizes and may not be suitable for fine-tuning.
+In nanoGPT speedrun experiments, Muon is used for the internal layer >2D weights, and AdamW is used for the 1D weights, embeddings, and heads.
+
+`Optimisers.adjust!(optimiser_state, η::Real)` will adjust the fallback optimizer's `eta` to `η * (opt.eta / eta)`, and Muon's `eta` to `η`, preserving their ratio,
+but `Optimisers.adjust!(optimiser, eta = η)` will only adjust Muon's learning rate (allowing you to adjust the fallback optimizer's learning rate separately).
+"""
+struct Muon <: AbstractRule
+    opt::AbstractRule
+    eta::Float64
+    mu::Float64
+    lambda::Float64
+    fallback::Function
+end
+
+Muon(;opt = AdamW(eta = 0.0003, beta = (0.9,0.95), lambda = 0.01), eta = 0.02, mu = 0.95, lambda = 0.01, fallback = x -> false) = Muon(opt, eta, mu, lambda, fallback)
+
+function init(o::Muon, x::AbstractArray)
+  if nonfirstdims(x) == 1 || o.fallback(x)
+    return init(o.opt, x)
+  else
+    return zero(x)
+  end
+end
+
+function apply!(o::Muon, state, x::AbstractArray{T}, dx) where T
+    if nonfirstdims(x) == 1 || o.fallback(x)
+      return apply!(o.opt, state, x, dx)
+    else
+      η = T(o.eta); μ = T(o.mu); λ = T(o.lambda)
+      # momentum: m ← β m + (1-β) g
+      @.. state = μ * state + (one(T) - μ) * dx
+      # Nesterov update fed to NS5: U ← (1-β) g + β m
+      U = @. (one(T) - μ) * dx + μ * state
+      # orthogonalize + post shape factor √max(1, r/c)
+      Ot = _newton_schulz5(U)
+      r = size(x, 1); c = nonfirstdims(x)
+      s = T(sqrt(max(one(T), T(r) / T(c))))
+      dx′ = @lazy η * (Ot * s + λ * x)   # decoupled WD, step will subtract dx′
+      return state, dx′
+    end
+end
+
+function _inner_newton_schulz5(X::AbstractMatrix{T}) where T
+  a, b, c = (T(3.4445f0), T(-4.7750f0), T(2.0315f0))
+  for _ in 1:5
+    A = X * X'
+    B = b * A + c * A * A
+    X = a * X + B * X
+  end 
+  X
+end
+
+function _newton_schulz5(G::AbstractMatrix{T}) where T
+    X = G / (norm(G) + T(1e-7))
+    if size(G, 1) > size(G, 2)
+      return transpose(_inner_newton_schulz5(transpose(X)))
+    else
+      return _inner_newton_schulz5(X)
+    end
+end
+_newton_schulz5(G::AbstractArray) = reshape(_newton_schulz5(reshape(G, size(G,1), :)), size(G))
+
+adjust(r::Muon, η::Real) = adjust(r, eta = η, opt = adjust(r.opt, eta = (r.opt.eta / r.eta) * η))
 
 """
     NormGrowthCap(τ = 1.01; ϵ = 1e-8, lb = 1e-7, throw = true, scale = true)
