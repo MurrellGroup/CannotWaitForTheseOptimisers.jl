@@ -1,5 +1,7 @@
 # See https://github.com/FluxML/Optimisers.jl/pull/204
 
+using Optimisers: isnumeric, _trainable, mapvalue
+
 setup(rule::AbstractRule, model) = setup(Returns(rule), model)
 function setup(fun::Function, model)
   cache = IdDict()
