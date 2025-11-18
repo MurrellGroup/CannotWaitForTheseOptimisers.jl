@@ -1,3 +1,4 @@
+using MatrixSign: msign!, JordanMethod
 
 nonfirstdims(x) = prod(size(x)[2:end])
 
@@ -51,33 +52,14 @@ function apply!(o::Muon, state, x::AbstractArray{T}, dx) where T
       # Nesterov update fed to NS5: U ← (1-β) g + β m
       U = @. (one(T) - μ) * dx + μ * state
       # orthogonalize + post shape factor √max(1, r/c)
-      Ot = _newton_schulz5(U)
+      msign!(reshape(U, size(U, 1), :), JordanMethod, fused=3)
+      Ot = U
       r = size(x, 1); c = nonfirstdims(x)
       s = T(sqrt(max(one(T), T(r) / T(c))))
       dx′ = @lazy η * (Ot * s + λ * x)   # decoupled WD, step will subtract dx′
       return state, dx′
     end
 end
-
-function _inner_newton_schulz5(X::AbstractMatrix{T}) where T
-  a, b, c = (T(3.4445f0), T(-4.7750f0), T(2.0315f0))
-  for _ in 1:5
-    A = X * X'
-    B = b * A + c * A * A
-    X = a * X + B * X
-  end 
-  X
-end
-
-function _newton_schulz5(G::AbstractMatrix{T}) where T
-    X = G / (norm(G) + T(1e-7))
-    if size(G, 1) > size(G, 2)
-      return transpose(_inner_newton_schulz5(transpose(X)))
-    else
-      return _inner_newton_schulz5(X)
-    end
-end
-_newton_schulz5(G::AbstractArray) = reshape(_newton_schulz5(reshape(G, size(G,1), :)), size(G))
 
 adjust(r::Muon, η::Real) = adjust(r, eta = η, opt = adjust(r.opt, eta = (r.opt.eta / r.eta) * η))
 

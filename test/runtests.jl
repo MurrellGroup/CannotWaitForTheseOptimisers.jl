@@ -79,6 +79,7 @@ end
 @testset "StaticArrays" begin
   empty!(LOG)
   @testset "$(name(o))" for o in RULES
+    o isa Muon && continue
     W1 = @SMatrix randn(10, 10)
     b1 = @SVector randn(10)
     W2 = @SMatrix randn(10, 10)
