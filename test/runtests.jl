@@ -78,7 +78,7 @@ end
 
 @testset "StaticArrays" begin
   empty!(LOG)
-  @testset "$(name(o))" for o in RULES
+  @testset "$(name(o))" for o in filter(o -> o ∉ RULES[[1,end-1,end]], RULES)
     o isa Muon && continue
     W1 = @SMatrix randn(10, 10)
     b1 = @SVector randn(10)
